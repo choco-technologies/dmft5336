@@ -58,6 +58,8 @@ int chip_connect(dmdrvi_context_t context)
 {
     if (context->bus != NULL)
         return 0;
+    if (context->bus_path == NULL)
+        return -ENODEV;     /* The i2c_bus friend has not been reported (yet) */
 
     context->bus = Dmod_FileOpen(context->bus_path, "r+");
     if (context->bus == NULL)
@@ -85,6 +87,8 @@ void chip_disconnect(dmdrvi_context_t context)
         Dmod_FileClose(context->bus);
         context->bus = NULL;
     }
+    context->chip_id     = 0;
+    context->firmware_id = 0;
 }
 
 int chip_read_state(dmdrvi_context_t context, dmft5336_state_t *state)

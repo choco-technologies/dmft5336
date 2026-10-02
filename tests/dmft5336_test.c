@@ -7,12 +7,12 @@
 #include <errno.h>
 #include <string.h>
 
-/* There is no I2C bus on the host: the bus path below never exists, so the
- * driver can be created but every access to the chip reports -ENODEV. */
+/* The I2C bus is reported as a friend (friend_role=i2c_bus). There is no
+ * I2C bus on the host: until a bus is reported - and with a reported path
+ * that does not exist - every access to the chip reports -ENODEV. */
 #define TEST_INI \
     "[touch]\n" \
     "driver_name=dmft5336\n" \
-    "i2c_bus=/dev/dmi2cx/no_such_bus\n" \
     "address=56\n" \
     "width=480\nheight=272\nswap_xy=on\n"
 
@@ -25,6 +25,7 @@ typedef struct
     dmod_dmdrvi_read_t      read;
     dmod_dmdrvi_write_t     write;
     dmod_dmdrvi_ioctl_t     ioctl;
+    dmod_dmdrvi_friend_changed_t friend_changed;
 } driver_t;
 
 typedef struct
@@ -129,8 +130,9 @@ static bool get_driver(driver_t* drv)
     drv->read   = Dmod_GetDifFunction(module, dmod_dmdrvi_read_sig);
     drv->write  = Dmod_GetDifFunction(module, dmod_dmdrvi_write_sig);
     drv->ioctl  = Dmod_GetDifFunction(module, dmod_dmdrvi_ioctl_sig);
+    drv->friend_changed = Dmod_GetDifFunction(module, dmod_dmdrvi_friend_changed_sig);
     return drv->create != NULL && drv->free != NULL && drv->open != NULL && drv->close != NULL &&
-           drv->read != NULL && drv->write != NULL && drv->ioctl != NULL;
+           drv->read != NULL && drv->write != NULL && drv->ioctl != NULL && drv->friend_changed != NULL;
 }
 
 static bool device_open(device_t* dev, const char* ini_text)
@@ -177,15 +179,11 @@ DMOD_TEST_STEP(dmft5336_create_names_node_after_section)
 DMOD_TEST_STEP(dmft5336_create_rejects_invalid_config)
 {
     device_t dev;
-    DMOD_TEST_EXPECT_FALSE(device_open(&dev, "[touch]\ndriver_name=dmft5336\n"));
+    DMOD_TEST_EXPECT_FALSE(device_open(&dev, "[touch]\naddress=200\n"));
     DMOD_TEST_EXPECT_NULL(dev.ctx);
     device_close(&dev);
 
-    DMOD_TEST_EXPECT_FALSE(device_open(&dev, "[touch]\ni2c_bus=/dev/x\naddress=200\n"));
-    DMOD_TEST_EXPECT_NULL(dev.ctx);
-    device_close(&dev);
-
-    DMOD_TEST_EXPECT_FALSE(device_open(&dev, "[touch]\ni2c_bus=/dev/x\npoll_interval_ms=0\n"));
+    DMOD_TEST_EXPECT_FALSE(device_open(&dev, "[touch]\npoll_interval_ms=0\n"));
     DMOD_TEST_EXPECT_NULL(dev.ctx);
     device_close(&dev);
 }
@@ -230,6 +228,38 @@ DMOD_TEST_STEP(dmft5336_ioctl_answers_only_its_own_command_range)
         DMOD_TEST_EXPECT_EQ((int)dmft5336_ioctl_cmd_get_info, DMDRVI_IOCTL_CUSTOM_BASE);
         DMOD_TEST_EXPECT_EQ(dev.drv.ioctl(dev.ctx, dev.handle, dmft5336_ioctl_cmd_get_info, NULL), -EINVAL);
         DMOD_TEST_EXPECT_EQ(dev.drv.write(dev.ctx, dev.handle, probe, 4, 0), -ENOTSUP);
+    }
+    device_close(&dev);
+}
+
+DMOD_TEST_STEP(dmft5336_takes_the_bus_from_its_i2c_bus_friend)
+{
+    device_t dev;
+    DMOD_TEST_EXPECT_TRUE(device_open(&dev, TEST_INI));
+    if (dev.handle != NULL)
+    {
+        dmft5336_state_t state;
+        dmdrvi_friend_info_t bus = { 0 };
+        bus.friend_role = "i2c_bus";
+        bus.node_path   = "/dev/dmi2cx/no_such_bus";
+        bus.state       = dmdrvi_dev_state_ready;
+        dmdrvi_friend_info_t other = bus;
+        other.friend_role = "chip_select";
+
+        /* No bus reported yet, then other friends are ignored */
+        DMOD_TEST_EXPECT_EQ(dev.drv.read(dev.ctx, dev.handle, &state, sizeof(state), 0), -ENODEV);
+        dev.drv.friend_changed(dev.ctx, &other);
+        dev.drv.friend_changed(dev.ctx, NULL);
+        DMOD_TEST_EXPECT_EQ(dev.drv.read(dev.ctx, dev.handle, &state, sizeof(state), 0), -ENODEV);
+
+        /* A reported bus is opened on use - here it does not exist */
+        dev.drv.friend_changed(dev.ctx, &bus);
+        DMOD_TEST_EXPECT_EQ(dev.drv.read(dev.ctx, dev.handle, &state, sizeof(state), 0), -ENODEV);
+
+        /* The bus going away is handled as well */
+        bus.state = dmdrvi_dev_state_dead;
+        dev.drv.friend_changed(dev.ctx, &bus);
+        DMOD_TEST_EXPECT_EQ(dev.drv.read(dev.ctx, dev.handle, &state, sizeof(state), 0), -ENODEV);
     }
     device_close(&dev);
 }

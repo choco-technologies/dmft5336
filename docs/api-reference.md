@@ -3,7 +3,9 @@
 `dmft5336` is a [dmdrvi](https://github.com/choco-technologies/dmdrvi) driver
 (DIF version 2.0) for the FocalTech FT5336 capacitive touch controller. The
 chip is reached through a [dmi2c](https://github.com/choco-technologies/dmi2c)
-bus node; the driver has no hardware port of its own.
+bus node - reported to the driver as a friend (`friend_role=i2c_bus`, see
+[configuration.md](configuration.md)); the driver has no hardware port of its
+own.
 
 `dmdevfs` names the node after the configuration section - `[touch]` becomes
 `/dev/touch` (`/dev/dmft53360` when the section name cannot be used).

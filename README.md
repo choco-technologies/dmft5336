@@ -52,14 +52,18 @@ monitor with `sysbus.i2c3.touchscreen MoveTo X Y`, `... Press`, `... Release`.
 
 ## Usage
 
-Add the bus, the driver and its board configuration to the firmware, e.g. in
-dmod-boot's `configs/board/stm32f746g-disco/flash.dmd`:
+Add dmi2c and the driver with its board configuration to the firmware, e.g.
+in dmod-boot's `configs/board/stm32f746g-disco/flash.dmd`:
 
 ```
-dmi2c driver=board/stm32f746g-disco/i2c3.ini
+dmi2c
 dmft5336 driver=board/stm32f746g-disco/touch.ini
 touchtest
 ```
+
+`touch.ini` configures the I2C pins, the dmi2c bus and the panel together;
+the bus is handed to the driver as a friend (`friend_role=i2c_bus`), so no
+bus path is configured by hand.
 
 Then:
 

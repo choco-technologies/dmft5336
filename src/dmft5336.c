@@ -19,6 +19,14 @@ static bool is_valid_context(dmdrvi_context_t context)
     return (context != NULL && context->magic == DMFT5336_CONTEXT_MAGIC);
 }
 
+/* ---- I2C bus ----
+ *
+ * The bus is a dmi2c device in the same friends_group as this device, with
+ * friend_role=i2c_bus. dmdevfs reports its node path through
+ * dmdrvi_friend_changed(); only the path is retained there - the bus is
+ * opened and the chip probed on first use (chip_connect()), not from inside
+ * the dmdevfs notification. */
+
 /* ---- INT pin ----
  *
  * The chip's INT output is a dmgpio input configured with
@@ -48,13 +56,8 @@ static char *dup_optional(dmini_context_t ini, const char *key)
     return (value != NULL && value[0] != '\0') ? Dmod_StrDup(value) : NULL;
 }
 
-static int check_config(dmdrvi_context_t context, int address, int poll_ms)
+static int check_config(int address, int poll_ms)
 {
-    if (context->bus_path == NULL)
-    {
-        DMOD_LOG_ERROR("i2c_bus not set in configuration (path of the dmi2c node)\n");
-        return -EINVAL;
-    }
     if (address < DMFT5336_ADDRESS_MIN || address > DMFT5336_ADDRESS_MAX)
     {
         DMOD_LOG_ERROR("Invalid address %d (expected %d..%d)\n", address, DMFT5336_ADDRESS_MIN, DMFT5336_ADDRESS_MAX);
@@ -83,7 +86,6 @@ static int read_config(dmdrvi_context_t context, dmini_context_t ini)
     int width   = dmini_get_int(ini, NULL, "width", 0);
     int height  = dmini_get_int(ini, NULL, "height", 0);
 
-    context->bus_path          = dup_optional(ini, "i2c_bus");
     context->interrupt_handler = dup_optional(ini, "interrupt_handler");
     t->swap_xy  = string_to_switch(dmini_get_string(ini, NULL, "swap_xy", NULL));
     t->invert_x = string_to_switch(dmini_get_string(ini, NULL, "invert_x", NULL));
@@ -97,7 +99,7 @@ static int read_config(dmdrvi_context_t context, dmini_context_t ini)
     t->width  = (uint16_t)width;
     t->height = (uint16_t)height;
 
-    int ret = check_config(context, address, poll_ms);
+    int ret = check_config(address, poll_ms);
     context->address          = (uint16_t)address;
     context->poll_interval_ms = (uint32_t)poll_ms;
     return ret;
@@ -259,10 +261,11 @@ dmod_dmdrvi_dif_api_declaration(2.0, dmft5336, dmdrvi_context_t, _create, ( dmin
         return NULL;
     }
 
-    /* The bus node can only be opened once dmdevfs is mounted, so the chip
-     * is reached on first use (read/ioctl). Not from _path_ready(): that runs
-     * on dmdevfs' hotplug thread, whose stack is not sized for a nested file
-     * open and I2C transfers (it overflowed on the STM32F746G-DISCO). */
+    /* The bus is reported later as a friend (see _friend_changed()) and the
+     * chip is reached on first use (read/ioctl) - not from a dmdevfs
+     * notification: those run on dmdevfs' hotplug thread, whose stack is not
+     * sized for a nested file open and I2C transfers (it overflowed on the
+     * STM32F746G-DISCO). */
     fill_dev_num(config, dev_num);
     return context;
 }
@@ -271,6 +274,28 @@ dmod_dmdrvi_dif_api_declaration(2.0, dmft5336, void, _free, ( dmdrvi_context_t c
 {
     if (is_valid_context(context))
         destroy_context(context);
+}
+
+dmod_dmdrvi_dif_api_declaration(2.0, dmft5336, void, _friend_changed,
+    ( dmdrvi_context_t context, const dmdrvi_friend_info_t* info ))
+{
+    if (!is_valid_context(context) || info == NULL || info->friend_role == NULL ||
+        strcmp(info->friend_role, DMFT5336_BUS_FRIEND_ROLE) != 0)
+    {
+        return;
+    }
+
+    dmosi_mutex_lock(context->lock);
+    chip_disconnect(context);
+    Dmod_Free(context->bus_path);
+    context->bus_path = NULL;
+    if (info->state == dmdrvi_dev_state_ready && info->node_path != NULL)
+    {
+        context->bus_path = Dmod_StrDup(info->node_path);
+        if (context->bus_path == NULL)
+            DMOD_LOG_ERROR("Failed to retain the I2C bus path\n");
+    }
+    dmosi_mutex_unlock(context->lock);
 }
 
 dmod_dmdrvi_dif_api_declaration(2.0, dmft5336, void*, _open, ( dmdrvi_context_t context, int flags, const dmdrvi_dev_num_t* dev_num ))

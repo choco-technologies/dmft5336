@@ -18,13 +18,16 @@
 
 #define FT5336_G_MODE_TRIGGER       0x01    /* INT pulses on every new report */
 
+/* friend_role of the dmi2c bus the chip is on (same friends_group) */
+#define DMFT5336_BUS_FRIEND_ROLE    "i2c_bus"
+
 /**
  * @brief DMDRVI context structure
  */
 struct dmdrvi_context
 {
     uint32_t                magic;              /**< Magic number for validation */
-    char                   *bus_path;           /**< dmi2c node of the bus the chip is on */
+    char                   *bus_path;           /**< dmi2c node of the bus (friend_role=i2c_bus), NULL until reported */
     uint16_t                address;            /**< Unshifted 7-bit I2C address */
     dmft5336_transform_t    transform;          /**< Panel -> screen coordinates */
     char                   *interrupt_handler;  /**< dmhaman name fired by the INT pin (NULL = poll) */

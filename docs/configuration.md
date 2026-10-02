@@ -8,7 +8,6 @@
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `i2c_bus` | path | (required) | dmi2c node of the bus the chip is on, e.g. `/dev/dmi2cx/touch_i2c` |
 | `address` | decimal | 56 (0x38) | Unshifted 7-bit I2C address, 8..119 |
 | `width` | decimal | 0 | Screen width - inversion and clipping of X (0 = none) |
 | `height` | decimal | 0 | Screen height - inversion and clipping of Y (0 = none) |
@@ -21,12 +20,23 @@
 Integers are decimal (`dmini_get_int`). The transformation is applied as:
 swap X/Y, then invert X against `width - 1` and Y against `height - 1`.
 
-## Order and dependencies
+## I2C bus (friend)
 
-The bus must exist before the touch panel is used: give the touch section a
-`driver_order` after the dmi2c bus (dmi2c's board files use 10 for the pins
-and 11 for the bus). The bus node is only opened on first use, so the order
-matters for when the panel becomes usable, not for creating it.
+The bus is not configured as a path. Configure it in the same file - the
+I2C pins (`dmgpio`) and the bus (`dmi2c`) - and put all sections in one
+`friends_group`; give the bus section `friend_role=i2c_bus`. dmdevfs reports
+the bus node's path to dmft5336 through `dmdrvi_friend_changed()` once it
+exists. Until then (or if the bus goes away) every access to the chip
+returns `-ENODEV`.
+
+The driver only stores the path in that notification; the bus is opened and
+the chip probed (chip ID, firmware ID, INT trigger mode) on first use - not
+inside a dmdevfs callback.
+
+Use the usual ordering: pins, then the bus, then the panel (e.g.
+`driver_order` 10, 11 and 12). A bus shared with other devices (e.g. an
+audio codec on the same controller) is configured once - other drivers on
+it join the same friends group.
 
 ## INT pin (optional)
 
@@ -38,6 +48,7 @@ give the touch section the same name:
 [touch_int]
 driver_name=dmgpio
 driver_order=12
+friends_group=touch
 pin=PI13
 mode=input
 pull=up
@@ -47,7 +58,7 @@ interrupt_handler=touch_int
 [touch]
 driver_name=dmft5336
 driver_order=12
-i2c_bus=/dev/dmi2cx/touch_i2c
+friends_group=touch
 interrupt_handler=touch_int
 ```
 
@@ -58,23 +69,45 @@ Two things to check on a board before using it:
   need EXTI13 - which is why that board's configuration polls.
 - **Interrupt priority:** the handler posts a dmosi semaphore from the GPIO
   interrupt, which FreeRTOS only allows at or below its maximum syscall
-  priority. dmgpio currently leaves the EXTI interrupt at the default
-  (highest) NVIC priority, which trips FreeRTOS' `configASSERT` in
-  `vPortValidateInterruptPriority()`.
+  priority. dmgpio releases without the EXTI priority fix leave the EXTI
+  interrupt at the default (highest) NVIC priority, which trips FreeRTOS'
+  `configASSERT` in `vPortValidateInterruptPriority()`.
 
 ## Example (STM32F746G-DISCO)
 
-See [`configs/board/stm32f746g-disco/touch.ini`](../configs/board/stm32f746g-disco/touch.ini)
-- together with dmi2c's `configs/board/stm32f746g-disco/i2c3.ini`:
+[`configs/board/stm32f746g-disco/touch.ini`](../configs/board/stm32f746g-disco/touch.ini)
+is the complete configuration - the I2C3 pins, the bus and the panel:
 
 ```ini
+[touch_i2c_scl]
+driver_name=dmgpio
+driver_order=10
+friends_group=touch
+pin=PH7
+mode=alternate
+alternate_function=4
+output_circuit=open_drain
+
+; ... [touch_i2c_sda] on PH8 likewise ...
+
+[touch_i2c]
+driver_name=dmi2c
+driver_order=11
+friends_group=touch
+friend_role=i2c_bus
+instance=3
+baudrate=100000
+
 [touch]
 driver_name=dmft5336
 driver_order=12
-i2c_bus=/dev/dmi2cx/touch_i2c
+friends_group=touch
 address=56
 width=480
 height=272
 swap_xy=on
 poll_interval_ms=20
 ```
+
+Do not load dmi2c's own `i2c3.ini` next to it - it configures the same
+controller.
