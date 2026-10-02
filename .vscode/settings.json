@@ -1,6 +1,7 @@
 {
     "files.associations": {
-        "dmft5336.h": "c"
+        "dmft5336.h": "c",
+        "dmft5336_types.h": "c"
     },
     "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
     "C_Cpp.intelliSenseEngine": "default",

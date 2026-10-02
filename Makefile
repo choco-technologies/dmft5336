@@ -24,7 +24,7 @@ DMOD_MODULE_VERSION=0.1
 DMOD_AUTHOR_NAME=Patryk Kubiak
 
 # The list of C sources
-DMOD_CSOURCES=src/dmft5336.c
+DMOD_CSOURCES=src/dmft5336.c src/chip.c
 
 # The list of C++ sources
 DMOD_CXXSOURCES=
@@ -33,7 +33,7 @@ DMOD_CXXSOURCES=
 DMOD_INC_DIRS=include
 
 # The list of libraries to link
-DMOD_LIBS=
+DMOD_LIBS=dmdrvi dmini dmi2c dmhaman dmosi
 
 # The list of definitions
 DMOD_DEFINITIONS=
