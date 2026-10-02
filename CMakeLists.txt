@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.18)
 
+# dmft5336 itself has no hardware port, but dmi2c (whose headers it uses)
+# publishes them only inside its per-CPU-family packages - the headers are
+# the same for every family, any published one will do.
+set(DMOD_CPU_FAMILY "stm32f7" CACHE STRING "CPU family used to fetch the dmi2c headers")
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(NOT DEFINED DMOD_MODULE_VERSION)
@@ -62,6 +67,22 @@ set(DMOD_DIF_IMPLS          )
 dmod_add_library(${DMOD_MODULE_NAME} ${DMOD_MODULE_VERSION}
     # List of source files - can include C and C++ files
     src/dmft5336.c
+    src/chip.c
+)
+
+# dmdrvi:  the driver interface dmft5336 implements (src/dmft5336.c).
+# dmini:   .ini configuration.
+# dmi2c:   headers only - the chip is reached through the dmi2c bus node
+#          (Dmod_FileOpen/Dmod_Ioctl), using its message/transfer types and
+#          ioctl numbers.
+# dmhaman: the INT pin's dmgpio interrupt handler is dispatched by name.
+# dmosi:   event semaphore, lock, sleep and tick count.
+dmod_link_modules(${DMOD_MODULE_NAME}
+    dmdrvi@>=2.0
+    dmini
+    dmi2c
+    dmhaman
+    dmosi
 )
 
 target_include_directories(${DMOD_MODULE_NAME} PRIVATE
@@ -72,9 +93,13 @@ target_include_directories(${DMOD_MODULE_NAME}_if INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# To depend on another module's headers, use:
-#   dmod_link_modules(${DMOD_MODULE_NAME}
-#       other_module@1.0
-#   )
 enable_testing()
 add_subdirectory(tests)
+
+# ======================================================================
+#               touchtest Tool
+# ======================================================================
+# On-target application - prints touches reported by the device node
+# dmdevfs creates for a configured panel (see tools/touchtest/README.md).
+# Not part of the ctest suite: it needs a finger on a real (or emulated) panel.
+add_subdirectory(tools/touchtest)

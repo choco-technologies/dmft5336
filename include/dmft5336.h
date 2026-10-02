@@ -1,51 +1,26 @@
 #ifndef DMFT5336_H
 #define DMFT5336_H
 
-#include <stdint.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include "dmod_types.h"
 #include "dmft5336_defs.h"
+#include "dmft5336_types.h"
 
 /**
- * Public API for the dmft5336 module.
+ * @brief Decode one touch point record as read from the chip.
  *
- * Functions are declared with the dmod_dmft5336_api(...) macro - dmod's
- * standard pattern for functions callable from other modules (or from this
- * module's own tests/), resolved dynamically by the loader rather than
- * through normal static linkage. See dm_sw_ring/include/dm_sw_ring.h for a
- * fully worked real-world example of the same shape.
+ * @p raw holds the point's registers starting at its XH register:
+ * XH, XL, YH, YL, WEIGHT, MISC (raw[4]/raw[5] may be zero). The panel
+ * coordinates are converted to screen coordinates with @p transform.
  *
- * Definitions in src/dmft5336.c use the matching
- * dmod_dmft5336_api_declaration(...) macro - a plain C function
- * definition here will NOT satisfy these declarations at link time.
- *
- * This is an example interface using the usual "opaque handle" pattern -
- * replace the handle, functions, and struct definition in
- * src/dmft5336.c with your module's real API.
+ * @return true if the record describes a touch (event flag other than
+ *         "none"), false otherwise or on NULL arguments.
  */
-
-/* Opaque handle - the real struct is defined in src/dmft5336.c */
-typedef struct dmft5336* dmft5336_t;
+dmod_dmft5336_api(1.0, bool, _decode_point, ( const uint8_t raw[6], const dmft5336_transform_t* transform, dmft5336_point_t* point ));
 
 /**
- * Create a new dmft5336 instance.
+ * @brief Compare two touch states field by field (padding is ignored).
  *
- * @return A valid handle on success, or NULL on allocation failure.
+ * @return true if both report the same points, false otherwise or on NULL.
  */
-dmod_dmft5336_api(1.0, dmft5336_t, _create, ( void ));
-
-/**
- * Destroy an instance created by dmft5336_create(). Safe to call with
- * NULL.
- */
-dmod_dmft5336_api(1.0, void, _destroy, ( dmft5336_t handle ));
-
-/**
- * Example accessor - replace with your module's real API.
- *
- * @return true if handle is a valid, non-NULL instance.
- */
-dmod_dmft5336_api(1.0, bool, _is_valid, ( dmft5336_t handle ));
+dmod_dmft5336_api(1.0, bool, _states_equal, ( const dmft5336_state_t* a, const dmft5336_state_t* b ));
 
 #endif // DMFT5336_H

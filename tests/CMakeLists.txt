@@ -14,6 +14,13 @@ target_include_directories(${DMOD_MODULE_NAME} PRIVATE
 
 target_link_libraries(${DMOD_MODULE_NAME} dmft5336_if)
 
+# dmdrvi: the DIF the tests call dmft5336 through (like dmdevfs); dmini: its
+# configuration.
+dmod_link_modules(${DMOD_MODULE_NAME}
+    dmdrvi@>=2.0
+    dmini
+)
+
 # Register the test module with ctest - this replays the same two steps CI
 # runs (see .github/templates/ci.yml.template): install the test module's
 # dependencies with dmf-get, then execute it through dmod_loader. The test's
