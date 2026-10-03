@@ -50,6 +50,12 @@ void dmod_test_teardown(void)
 
 /* ---- Point decoding ---- */
 
+/* Event flag of a point record, as the chip sends it */
+#define RAW_EVENT_DOWN      0
+#define RAW_EVENT_UP        1
+#define RAW_EVENT_CONTACT   2
+#define RAW_EVENT_NONE      3
+
 /* XH: event in bits 7:6, X[11:8] in 3:0; YH: ID in 7:4, Y[11:8] in 3:0 */
 static void make_raw(uint8_t raw[6], uint8_t event, uint16_t x, uint16_t y, uint8_t id)
 {
@@ -64,24 +70,38 @@ static void make_raw(uint8_t raw[6], uint8_t event, uint16_t x, uint16_t y, uint
 DMOD_TEST_STEP(dmft5336_decode_point_plain)
 {
     uint8_t raw[6];
-    dmft5336_point_t p;
-    make_raw(raw, dmft5336_event_contact, 0x1A5, 0x0C3, 2);
+    dmdrvi_input_contact_t p;
+    make_raw(raw, RAW_EVENT_CONTACT, 0x1A5, 0x0C3, 2);
 
     DMOD_TEST_EXPECT_TRUE(dmft5336_decode_point(raw, &g_transform, &p));
     DMOD_TEST_EXPECT_EQ(p.x, 0x1A5);
     DMOD_TEST_EXPECT_EQ(p.y, 0x0C3);
     DMOD_TEST_EXPECT_EQ(p.id, 2);
-    DMOD_TEST_EXPECT_EQ(p.event, dmft5336_event_contact);
-    DMOD_TEST_EXPECT_EQ(p.weight, 0x20);
-    DMOD_TEST_EXPECT_EQ(p.area, 0x3);
+    DMOD_TEST_EXPECT_EQ(p.event, DMDRVI_INPUT_CONTACT_MOVE);
+    DMOD_TEST_EXPECT_EQ(p.pressure, 0x20);
+    DMOD_TEST_EXPECT_EQ(p.size, 0x3);
+}
+
+DMOD_TEST_STEP(dmft5336_decode_point_maps_events)
+{
+    uint8_t raw[6];
+    dmdrvi_input_contact_t p;
+
+    make_raw(raw, RAW_EVENT_DOWN, 1, 1, 0);
+    DMOD_TEST_EXPECT_TRUE(dmft5336_decode_point(raw, &g_transform, &p));
+    DMOD_TEST_EXPECT_EQ(p.event, DMDRVI_INPUT_CONTACT_DOWN);
+
+    make_raw(raw, RAW_EVENT_UP, 1, 1, 0);
+    DMOD_TEST_EXPECT_TRUE(dmft5336_decode_point(raw, &g_transform, &p));
+    DMOD_TEST_EXPECT_EQ(p.event, DMDRVI_INPUT_CONTACT_UP);
 }
 
 DMOD_TEST_STEP(dmft5336_decode_point_transforms)
 {
     uint8_t raw[6];
-    dmft5336_point_t p;
+    dmdrvi_input_contact_t p;
     /* Panel X=100, Y=300 on a panel mounted with swapped axes */
-    make_raw(raw, dmft5336_event_down, 100, 300, 0);
+    make_raw(raw, RAW_EVENT_DOWN, 100, 300, 0);
 
     g_transform.swap_xy = true;
     DMOD_TEST_EXPECT_TRUE(dmft5336_decode_point(raw, &g_transform, &p));
@@ -100,16 +120,16 @@ DMOD_TEST_STEP(dmft5336_decode_point_transforms)
 DMOD_TEST_STEP(dmft5336_decode_point_clips_and_rejects)
 {
     uint8_t raw[6];
-    dmft5336_point_t p;
+    dmdrvi_input_contact_t p;
 
-    make_raw(raw, dmft5336_event_contact, 4000, 1000, 0);
+    make_raw(raw, RAW_EVENT_CONTACT, 4000, 1000, 0);
     g_transform.width = 480;
     g_transform.height = 272;
     DMOD_TEST_EXPECT_TRUE(dmft5336_decode_point(raw, &g_transform, &p));
     DMOD_TEST_EXPECT_EQ(p.x, 479);
     DMOD_TEST_EXPECT_EQ(p.y, 271);
 
-    make_raw(raw, dmft5336_event_none, 10, 10, 0);
+    make_raw(raw, RAW_EVENT_NONE, 10, 10, 0);
     DMOD_TEST_EXPECT_FALSE(dmft5336_decode_point(raw, &g_transform, &p));
     DMOD_TEST_EXPECT_FALSE(dmft5336_decode_point(NULL, &g_transform, &p));
 }
@@ -194,20 +214,54 @@ DMOD_TEST_STEP(dmft5336_reports_missing_bus)
     DMOD_TEST_EXPECT_TRUE(device_open(&dev, TEST_INI));
     if (dev.handle != NULL)
     {
-        dmft5336_state_t state;
-        dmft5336_info_t info;
+        dmdrvi_input_state_t state;
+        dmft5336_chip_info_t chip;
         uint32_t timeout = 10;
 
         DMOD_TEST_EXPECT_EQ(dev.drv.read(dev.ctx, dev.handle, &state, sizeof(state), 0), -ENODEV);
         DMOD_TEST_EXPECT_EQ(dev.drv.read(dev.ctx, dev.handle, &state, 4, 0), -EINVAL);
-        DMOD_TEST_EXPECT_EQ(dev.drv.ioctl(dev.ctx, dev.handle, dmft5336_ioctl_cmd_wait_event, &timeout), -ENODEV);
+        DMOD_TEST_EXPECT_EQ(dev.drv.ioctl(dev.ctx, dev.handle, DMDRVI_IOCTL_INPUT_GET_STATE, &state), -ENODEV);
+        DMOD_TEST_EXPECT_EQ(dev.drv.ioctl(dev.ctx, dev.handle, DMDRVI_IOCTL_INPUT_WAIT_EVENT, &timeout), -ENODEV);
 
-        DMOD_TEST_EXPECT_EQ(dev.drv.ioctl(dev.ctx, dev.handle, dmft5336_ioctl_cmd_get_info, &info), 0);
-        DMOD_TEST_EXPECT_EQ(info.chip_id, 0);
-        DMOD_TEST_EXPECT_EQ(info.max_points, DMFT5336_MAX_POINTS);
-        DMOD_TEST_EXPECT_FALSE(info.interrupt_driven);
-        DMOD_TEST_EXPECT_TRUE(info.transform.swap_xy);
-        DMOD_TEST_EXPECT_EQ(info.transform.width, 480);
+        DMOD_TEST_EXPECT_EQ(dev.drv.ioctl(dev.ctx, dev.handle, dmft5336_ioctl_cmd_get_chip_info, &chip), 0);
+        DMOD_TEST_EXPECT_EQ(chip.chip_id, 0);
+        DMOD_TEST_EXPECT_TRUE(chip.transform.swap_xy);
+        DMOD_TEST_EXPECT_EQ(chip.transform.width, 480);
+    }
+    device_close(&dev);
+}
+
+DMOD_TEST_STEP(dmft5336_reports_standard_input_info)
+{
+    device_t dev;
+    DMOD_TEST_EXPECT_TRUE(device_open(&dev, TEST_INI));
+    if (dev.handle != NULL)
+    {
+        dmdrvi_input_info_t info;
+        memset(&info, 0xFF, sizeof(info));
+
+        /* Answered without the chip: it only reports the configuration */
+        DMOD_TEST_EXPECT_EQ(dev.drv.ioctl(dev.ctx, dev.handle, DMDRVI_IOCTL_INPUT_GET_INFO, &info), 0);
+        DMOD_TEST_EXPECT_EQ(strcmp(info.name, "FT5336"), 0);
+        DMOD_TEST_EXPECT_EQ(info.type, DMDRVI_INPUT_TYPE_TOUCHSCREEN);
+        DMOD_TEST_EXPECT_TRUE((info.capabilities & DMDRVI_INPUT_CAP_CONTACTS) != 0);
+        DMOD_TEST_EXPECT_EQ(info.capabilities & (DMDRVI_INPUT_CAP_MOTION | DMDRVI_INPUT_CAP_BUTTONS |
+                                                 DMDRVI_INPUT_CAP_WHEEL | DMDRVI_INPUT_CAP_INTERRUPT), 0u);
+        DMOD_TEST_EXPECT_EQ(info.width, 480);
+        DMOD_TEST_EXPECT_EQ(info.height, 272);
+        DMOD_TEST_EXPECT_EQ(info.max_contacts, DMFT5336_MAX_POINTS);
+        DMOD_TEST_EXPECT_EQ(info.button_count, 0);
+        DMOD_TEST_EXPECT_EQ(dev.drv.ioctl(dev.ctx, dev.handle, DMDRVI_IOCTL_INPUT_GET_INFO, NULL), -EINVAL);
+    }
+    device_close(&dev);
+
+    /* An INT pin makes WAIT_EVENT interrupt driven */
+    DMOD_TEST_EXPECT_TRUE(device_open(&dev, TEST_INI "interrupt_handler=touch_test_int\n"));
+    if (dev.handle != NULL)
+    {
+        dmdrvi_input_info_t info;
+        DMOD_TEST_EXPECT_EQ(dev.drv.ioctl(dev.ctx, dev.handle, DMDRVI_IOCTL_INPUT_GET_INFO, &info), 0);
+        DMOD_TEST_EXPECT_TRUE((info.capabilities & DMDRVI_INPUT_CAP_INTERRUPT) != 0);
     }
     device_close(&dev);
 }
@@ -225,8 +279,11 @@ DMOD_TEST_STEP(dmft5336_ioctl_answers_only_its_own_command_range)
         DMOD_TEST_EXPECT_EQ(dev.drv.ioctl(dev.ctx, dev.handle, 0, probe), -ENOTTY);
         DMOD_TEST_EXPECT_EQ(dev.drv.ioctl(dev.ctx, dev.handle, dmft5336_ioctl_cmd_max, probe), -ENOTTY);
 
-        DMOD_TEST_EXPECT_EQ((int)dmft5336_ioctl_cmd_get_info, DMDRVI_IOCTL_CUSTOM_BASE);
-        DMOD_TEST_EXPECT_EQ(dev.drv.ioctl(dev.ctx, dev.handle, dmft5336_ioctl_cmd_get_info, NULL), -EINVAL);
+        DMOD_TEST_EXPECT_EQ(dev.drv.ioctl(dev.ctx, dev.handle, DMDRVI_IOCTL_GFX_GET_INFO, probe), -ENOTTY);
+
+        DMOD_TEST_EXPECT_EQ((int)dmft5336_ioctl_cmd_get_chip_info, DMDRVI_IOCTL_CUSTOM_BASE);
+        DMOD_TEST_EXPECT_EQ(dev.drv.ioctl(dev.ctx, dev.handle, dmft5336_ioctl_cmd_get_chip_info, NULL), -EINVAL);
+        DMOD_TEST_EXPECT_EQ(dev.drv.ioctl(dev.ctx, dev.handle, DMDRVI_IOCTL_INPUT_GET_STATE, NULL), -EINVAL);
         DMOD_TEST_EXPECT_EQ(dev.drv.write(dev.ctx, dev.handle, probe, 4, 0), -ENOTSUP);
     }
     device_close(&dev);
@@ -238,7 +295,7 @@ DMOD_TEST_STEP(dmft5336_takes_the_bus_from_its_i2c_bus_friend)
     DMOD_TEST_EXPECT_TRUE(device_open(&dev, TEST_INI));
     if (dev.handle != NULL)
     {
-        dmft5336_state_t state;
+        dmdrvi_input_state_t state;
         dmdrvi_friend_info_t bus = { 0 };
         bus.friend_role = "i2c_bus";
         bus.node_path   = "/dev/dmi2cx/no_such_bus";

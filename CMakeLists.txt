@@ -70,7 +70,8 @@ dmod_add_library(${DMOD_MODULE_NAME} ${DMOD_MODULE_VERSION}
     src/chip.c
 )
 
-# dmdrvi:  the driver interface dmft5336 implements (src/dmft5336.c).
+# dmdrvi:  the driver interface dmft5336 implements (src/dmft5336.c), 2.3+
+#          for the standard input ioctls (DMDRVI_IOCTL_INPUT_*).
 # dmini:   .ini configuration.
 # dmi2c:   headers only - the chip is reached through the dmi2c bus node
 #          (Dmod_FileOpen/Dmod_Ioctl), using its message/transfer types and
@@ -78,7 +79,7 @@ dmod_add_library(${DMOD_MODULE_NAME} ${DMOD_MODULE_VERSION}
 # dmhaman: the INT pin's dmgpio interrupt handler is dispatched by name.
 # dmosi:   event semaphore, lock, sleep and tick count.
 dmod_link_modules(${DMOD_MODULE_NAME}
-    dmdrvi@>=2.0
+    dmdrvi@>=2.3
     dmini
     dmi2c
     dmhaman

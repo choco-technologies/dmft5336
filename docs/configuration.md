@@ -14,10 +14,12 @@
 | `swap_xy` | `on`/`off` | `off` | The panel's X axis is the screen's Y axis |
 | `invert_x` | `on`/`off` | `off` | Mirror X (needs `width`) |
 | `invert_y` | `on`/`off` | `off` | Mirror Y (needs `height`) |
-| `interrupt_handler` | name | (none) | dmhaman handler fired by the INT pin; without it `wait_event` polls |
-| `poll_interval_ms` | decimal | 20 | Polling period of `wait_event` without an INT pin, 1..1000 |
+| `interrupt_handler` | name | (none) | dmhaman handler fired by the INT pin; without it `DMDRVI_IOCTL_INPUT_WAIT_EVENT` polls |
+| `poll_interval_ms` | decimal | 20 | Polling period of `DMDRVI_IOCTL_INPUT_WAIT_EVENT` without an INT pin, 1..1000 |
 
-Integers are decimal (`dmini_get_int`). The transformation is applied as:
+These are the standard dmdrvi input keys (see dmdrvi's "Input Ioctl
+Commands"), so every input driver is configured the same way. Integers are
+decimal (`dmini_get_int`). The transformation is applied as:
 swap X/Y, then invert X against `width - 1` and Y against `height - 1`.
 
 ## I2C bus (friend)
@@ -40,7 +42,7 @@ it join the same friends group.
 
 ## INT pin (optional)
 
-To have `wait_event` sleep on the chip's interrupt instead of polling,
+To have `DMDRVI_IOCTL_INPUT_WAIT_EVENT` sleep on the chip's interrupt instead of polling,
 configure the INT pin as a `dmgpio` input with an interrupt handler name and
 give the touch section the same name:
 

@@ -18,6 +18,12 @@
 
 #define FT5336_G_MODE_TRIGGER       0x01    /* INT pulses on every new report */
 
+/* Event flag of a point record (XH bits 7:6) */
+#define FT5336_EVENT_DOWN           0
+#define FT5336_EVENT_UP             1
+#define FT5336_EVENT_CONTACT        2
+#define FT5336_EVENT_NONE           3
+
 /* friend_role of the dmi2c bus the chip is on (same friends_group) */
 #define DMFT5336_BUS_FRIEND_ROLE    "i2c_bus"
 
@@ -37,13 +43,13 @@ struct dmdrvi_context
     uint8_t                 firmware_id;
     dmosi_mutex_t           lock;               /**< Serializes bus access and state */
     dmosi_semaphore_t       event_sem;          /**< Posted from the INT handler */
-    dmft5336_state_t        last_state;         /**< Last state handed out (poll change detection) */
+    dmdrvi_input_state_t    last_state;         /**< Last state handed out (poll change detection) */
 };
 
 /* chip.c - everything that talks to the FT5336 over dmi2c. The caller holds
  * context->lock. */
 int  chip_connect(dmdrvi_context_t context);
 void chip_disconnect(dmdrvi_context_t context);
-int  chip_read_state(dmdrvi_context_t context, dmft5336_state_t *state);
+int  chip_read_state(dmdrvi_context_t context, dmdrvi_input_state_t *state);
 
 #endif // DMFT5336_PRIVATE_H

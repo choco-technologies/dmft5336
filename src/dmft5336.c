@@ -157,7 +157,7 @@ static void fill_dev_num(dmini_context_t ini, dmdrvi_dev_num_t *dev_num)
 
 /* ---- Touch state ---- */
 
-static int read_state(dmdrvi_context_t context, dmft5336_state_t *state)
+static int read_state(dmdrvi_context_t context, dmdrvi_input_state_t *state)
 {
     dmosi_mutex_lock(context->lock);
     int ret = chip_connect(context);
@@ -175,15 +175,15 @@ static bool timed_out(uint32_t start_ms, int32_t timeout_ms)
 }
 
 /* Without an INT pin: poll until the state differs from the one handed out
- * last (by read(), get_state or a previous wait). */
+ * last (by read() or DMDRVI_IOCTL_INPUT_GET_STATE). */
 static int poll_for_change(dmdrvi_context_t context, int32_t timeout_ms)
 {
     uint32_t start_ms = dmosi_get_tick_count();
-    dmft5336_state_t seen = context->last_state;
+    dmdrvi_input_state_t seen = context->last_state;
 
     for (;;)
     {
-        dmft5336_state_t now;
+        dmdrvi_input_state_t now;
         dmosi_mutex_lock(context->lock);
         int ret = chip_connect(context);
         if (ret == 0)
@@ -192,7 +192,7 @@ static int poll_for_change(dmdrvi_context_t context, int32_t timeout_ms)
 
         if (ret != 0)
             return ret;
-        if (!dmft5336_states_equal(&now, &seen))
+        if (!dmdrvi_input_state_equal(&now, &seen))
             return 0;
         if (timed_out(start_ms, timeout_ms))
             return -ETIMEDOUT;
@@ -211,17 +211,28 @@ static int wait_event(dmdrvi_context_t context, const uint32_t *timeout)
     return (dmosi_semaphore_wait(context->event_sem, 1, timeout_ms) == 0) ? 0 : -ETIMEDOUT;
 }
 
-static void get_info(dmdrvi_context_t context, dmft5336_info_t *info)
+static void get_info(dmdrvi_context_t context, dmdrvi_input_info_t *info)
+{
+    memset(info, 0, sizeof(*info));
+    memcpy(info->name, DMFT5336_DEVICE_NAME, sizeof(DMFT5336_DEVICE_NAME));
+    info->type         = DMDRVI_INPUT_TYPE_TOUCHSCREEN;
+    info->capabilities = DMDRVI_INPUT_CAP_CONTACTS | DMDRVI_INPUT_CAP_PRESSURE | DMDRVI_INPUT_CAP_CONTACT_SIZE;
+    if (context->interrupt_handler != NULL)
+        info->capabilities |= DMDRVI_INPUT_CAP_INTERRUPT;
+    info->width        = context->transform.width;
+    info->height       = context->transform.height;
+    info->max_contacts = DMFT5336_MAX_POINTS;
+}
+
+static void get_chip_info(dmdrvi_context_t context, dmft5336_chip_info_t *info)
 {
     dmosi_mutex_lock(context->lock);
     (void)chip_connect(context);
-    info->chip_id          = context->chip_id;
-    info->firmware_id      = context->firmware_id;
+    info->chip_id     = context->chip_id;
+    info->firmware_id = context->firmware_id;
     dmosi_mutex_unlock(context->lock);
 
-    info->max_points       = DMFT5336_MAX_POINTS;
-    info->interrupt_driven = context->interrupt_handler != NULL;
-    info->transform        = context->transform;
+    info->transform   = context->transform;
 }
 
 /* ---- DMOD lifecycle ---- */
@@ -319,11 +330,11 @@ dmod_dmdrvi_dif_api_declaration(2.0, dmft5336, dmdrvi_ssize_t, _read, ( dmdrvi_c
         return -EINVAL;
     if (size == 0)
         return 0;
-    if (size < sizeof(dmft5336_state_t))
+    if (size < sizeof(dmdrvi_input_state_t))
         return -EINVAL;
 
     /* offset is unused: every read returns the current touch state. */
-    dmft5336_state_t state;
+    dmdrvi_input_state_t state;
     int ret = read_state(context, &state);
     if (ret != 0)
         return ret;
@@ -348,15 +359,19 @@ dmod_dmdrvi_dif_api_declaration(2.0, dmft5336, int, _ioctl, ( dmdrvi_context_t c
 
     switch (command)
     {
-        case dmft5336_ioctl_cmd_get_info:
+        case DMDRVI_IOCTL_INPUT_GET_INFO:
             if (arg == NULL) return -EINVAL;
-            get_info(context, (dmft5336_info_t *)arg);
+            get_info(context, (dmdrvi_input_info_t *)arg);
             return 0;
-        case dmft5336_ioctl_cmd_get_state:
+        case DMDRVI_IOCTL_INPUT_GET_STATE:
             if (arg == NULL) return -EINVAL;
-            return read_state(context, (dmft5336_state_t *)arg);
-        case dmft5336_ioctl_cmd_wait_event:
+            return read_state(context, (dmdrvi_input_state_t *)arg);
+        case DMDRVI_IOCTL_INPUT_WAIT_EVENT:
             return wait_event(context, (const uint32_t *)arg);
+        case dmft5336_ioctl_cmd_get_chip_info:
+            if (arg == NULL) return -EINVAL;
+            get_chip_info(context, (dmft5336_chip_info_t *)arg);
+            return 0;
         default:
             /* Including the standard block/monitor/network commands dmdevfs
              * probes every node with. */

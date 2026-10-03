@@ -14,13 +14,6 @@
  * @return true if the record describes a touch (event flag other than
  *         "none"), false otherwise or on NULL arguments.
  */
-dmod_dmft5336_api(1.0, bool, _decode_point, ( const uint8_t raw[6], const dmft5336_transform_t* transform, dmft5336_point_t* point ));
-
-/**
- * @brief Compare two touch states field by field (padding is ignored).
- *
- * @return true if both report the same points, false otherwise or on NULL.
- */
-dmod_dmft5336_api(1.0, bool, _states_equal, ( const dmft5336_state_t* a, const dmft5336_state_t* b ));
+dmod_dmft5336_api(2.0, bool, _decode_point, ( const uint8_t raw[6], const dmft5336_transform_t* transform, dmdrvi_input_contact_t* contact ));
 
 #endif // DMFT5336_H

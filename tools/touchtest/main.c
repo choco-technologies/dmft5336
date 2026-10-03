@@ -3,10 +3,12 @@
 #include <string.h>
 
 /**
- * @brief Manual dmft5336 device test tool.
+ * @brief Manual input device test tool.
  *
- * Works on an already-configured touch panel node - it does not configure
- * anything itself, it only uses the device file (read/ioctl).
+ * Works on an already-configured input node - it does not configure
+ * anything itself, it only uses the device file (read and the standard
+ * DMDRVI_IOCTL_INPUT_* commands), so it works with any dmdrvi input driver.
+ * For an FT5336 it also prints the chip registers.
  */
 
 #define DEFAULT_DEVICE      "/dev/touch"
@@ -16,8 +18,8 @@
 static void print_usage(const char *name)
 {
     Dmod_Printf("Usage: %s [-d DEVICE] COMMAND [ARGS]\n", name);
-    Dmod_Printf("  info                     print the chip and driver configuration\n");
-    Dmod_Printf("  read                     print the current touch state\n");
+    Dmod_Printf("  info                     print what the device reports (and the FT5336 chip)\n");
+    Dmod_Printf("  read                     print the current input state\n");
     Dmod_Printf("  watch [EVENTS] [IDLE_MS] print touches as they happen (default %u events,\n", DEFAULT_EVENTS);
     Dmod_Printf("                           stops after IDLE_MS without a touch, default %u)\n", DEFAULT_IDLE_MS);
     Dmod_Printf("DEVICE defaults to %s\n", DEFAULT_DEVICE);
@@ -39,84 +41,117 @@ static const char *event_name(uint8_t event)
 {
     switch (event)
     {
-        case dmft5336_event_down:    return "down";
-        case dmft5336_event_up:      return "up";
-        case dmft5336_event_contact: return "contact";
-        default:                     return "none";
+        case DMDRVI_INPUT_CONTACT_DOWN: return "down";
+        case DMDRVI_INPUT_CONTACT_MOVE: return "move";
+        case DMDRVI_INPUT_CONTACT_UP:   return "up";
+        default:                        return "?";
     }
 }
 
-static void print_state(const dmft5336_state_t *state)
+static const char *type_name(dmdrvi_input_type_t type)
 {
-    if (state->count == 0)
+    switch (type)
+    {
+        case DMDRVI_INPUT_TYPE_TOUCHSCREEN: return "touchscreen";
+        case DMDRVI_INPUT_TYPE_MOUSE:       return "mouse";
+        case DMDRVI_INPUT_TYPE_BUTTONS:     return "buttons";
+        default:                            return "unknown";
+    }
+}
+
+static void print_state(const dmdrvi_input_state_t *state)
+{
+    if (state->buttons != 0U || state->dx != 0 || state->dy != 0 || state->wheel != 0)
+        Dmod_Printf("pointer: dx=%d dy=%d wheel=%d buttons=0x%X\n",
+                    state->dx, state->dy, state->wheel, (unsigned)state->buttons);
+    if (state->contact_count == 0)
     {
         Dmod_Printf("touch: released\n");
         return;
     }
-    for (uint8_t i = 0; i < state->count && i < DMFT5336_MAX_POINTS; i++)
+    for (uint8_t i = 0; i < state->contact_count && i < DMDRVI_INPUT_MAX_CONTACTS; i++)
     {
-        const dmft5336_point_t *p = &state->points[i];
-        Dmod_Printf("touch: %u/%u id=%u x=%u y=%u %s\n", i + 1U, state->count, p->id, p->x, p->y, event_name(p->event));
+        const dmdrvi_input_contact_t *c = &state->contacts[i];
+        Dmod_Printf("touch: %u/%u id=%u x=%u y=%u %s\n", i + 1U, state->contact_count, c->id, c->x, c->y, event_name(c->event));
     }
 }
 
-static int read_state(void *fp, dmft5336_state_t *state)
+static int read_state(void *fp, dmdrvi_input_state_t *state)
 {
     size_t n = Dmod_FileRead(state, 1, sizeof(*state), fp);
     if (n != sizeof(*state))
     {
-        DMOD_LOG_ERROR("touchtest: reading the touch state failed\n");
+        DMOD_LOG_ERROR("touchtest: reading the input state failed\n");
         return -1;
     }
     return 0;
 }
 
+/* FT5336 extras - only for a node that reported itself as one: another
+ * driver numbers its own commands from the same base. */
+static void print_chip_info(void *fp)
+{
+    dmft5336_chip_info_t chip;
+    if (Dmod_Ioctl(fp, dmft5336_ioctl_cmd_get_chip_info, &chip) != 0)
+        return;
+
+    Dmod_Printf("chip id:      0x%02X%s\n", chip.chip_id,
+                (chip.chip_id == DMFT5336_CHIP_ID) ? " (FT5336)" : (chip.chip_id == 0 ? " (not reached)" : ""));
+    Dmod_Printf("firmware id:  0x%02X\n", chip.firmware_id);
+    Dmod_Printf("transform:    swap_xy=%u invert_x=%u invert_y=%u\n",
+                chip.transform.swap_xy, chip.transform.invert_x, chip.transform.invert_y);
+}
+
 static int cmd_info(void *fp)
 {
-    dmft5336_info_t info;
-    if (Dmod_Ioctl(fp, dmft5336_ioctl_cmd_get_info, &info) != 0)
+    dmdrvi_input_info_t info;
+    if (Dmod_Ioctl(fp, DMDRVI_IOCTL_INPUT_GET_INFO, &info) != 0)
+    {
+        DMOD_LOG_ERROR("touchtest: not an input device\n");
         return -1;
+    }
+    info.name[DMDRVI_INPUT_NAME_MAX - 1U] = '\0';
 
-    Dmod_Printf("chip id:      0x%02X%s\n", info.chip_id,
-                (info.chip_id == DMFT5336_CHIP_ID) ? " (FT5336)" : (info.chip_id == 0 ? " (not reached)" : ""));
-    Dmod_Printf("firmware id:  0x%02X\n", info.firmware_id);
-    Dmod_Printf("max points:   %u\n", info.max_points);
-    Dmod_Printf("events:       %s\n", info.interrupt_driven ? "INT pin" : "polling");
-    Dmod_Printf("screen:       %ux%u swap_xy=%u invert_x=%u invert_y=%u\n",
-                info.transform.width, info.transform.height, info.transform.swap_xy,
-                info.transform.invert_x, info.transform.invert_y);
+    Dmod_Printf("device:       %s (%s)\n", info.name, type_name(info.type));
+    Dmod_Printf("capabilities: 0x%02X\n", (unsigned)info.capabilities);
+    Dmod_Printf("max points:   %u\n", info.max_contacts);
+    Dmod_Printf("buttons:      %u\n", info.button_count);
+    Dmod_Printf("events:       %s\n", (info.capabilities & DMDRVI_INPUT_CAP_INTERRUPT) ? "interrupt" : "polling");
+    Dmod_Printf("screen:       %ux%u\n", info.width, info.height);
+    if (strcmp(info.name, DMFT5336_DEVICE_NAME) == 0)
+        print_chip_info(fp);
     return 0;
 }
 
 static int cmd_read(void *fp)
 {
-    dmft5336_state_t state;
+    dmdrvi_input_state_t state;
     if (read_state(fp, &state) != 0)
         return -1;
     print_state(&state);
     return 0;
 }
 
-/* Waits for touch reports and prints every state change. */
+/* Waits for input events and prints every state change. */
 static int cmd_watch(void *fp, uint32_t events, uint32_t idle_ms)
 {
-    dmft5336_state_t last;
+    dmdrvi_input_state_t last;
     memset(&last, 0, sizeof(last));
 
     Dmod_Printf("touchtest: watching for %u events (idle timeout %u ms)\n", events, idle_ms);
     for (uint32_t seen = 0; seen < events;)
     {
-        int ret = Dmod_Ioctl(fp, dmft5336_ioctl_cmd_wait_event, &idle_ms);
+        int ret = Dmod_Ioctl(fp, DMDRVI_IOCTL_INPUT_WAIT_EVENT, &idle_ms);
         if (ret != 0)
         {
             Dmod_Printf("touchtest: no touch for %u ms, stopping (%d)\n", idle_ms, ret);
             return 0;
         }
 
-        dmft5336_state_t state;
+        dmdrvi_input_state_t state;
         if (read_state(fp, &state) != 0)
             return -1;
-        if (dmft5336_states_equal(&state, &last))
+        if (dmdrvi_input_state_equal(&state, &last))
             continue;
         print_state(&state);
         last = state;
