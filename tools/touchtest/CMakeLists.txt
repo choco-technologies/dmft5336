@@ -14,10 +14,10 @@ dmod_add_executable(touchtest ${DMOD_MODULE_VERSION}
 )
 
 # The panel is used only through Dmod_FileOpen/_FileRead/_Ioctl (dmod SAL);
-# dmft5336_if: the state/info types and ioctl numbers. dmdrvi: headers only,
-# for DMDRVI_IOCTL_CUSTOM_BASE.
+# dmdrvi: headers only - the standard input state/info types and
+# DMDRVI_IOCTL_INPUT_* (2.3+). dmft5336_if: the FT5336 chip info ioctl.
 dmod_link_modules(touchtest
-    dmdrvi@>=2.0
+    dmdrvi@>=2.3
 )
 
 target_link_libraries(touchtest dmft5336_if)

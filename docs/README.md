@@ -2,7 +2,8 @@
 
 `dmft5336` is a dmdrvi driver for the FocalTech FT5336 capacitive touch
 controller, reached through a dmi2c bus. It exposes the panel as a device
-node (e.g. `/dev/touch`).
+node (e.g. `/dev/touch`) - a standard dmdrvi input device, used through the
+`DMDRVI_IOCTL_INPUT_*` commands like any other input driver.
 
 ## Contents
 
@@ -12,11 +13,11 @@ node (e.g. `/dev/touch`).
 ## Quick Reference
 
 ```c
-#include "dmft5336.h"
+#include "dmdrvi_ioctl.h"
 
 void *touch = Dmod_FileOpen("/dev/touch", "r");
-dmft5336_state_t state;
-Dmod_FileRead(&state, 1, sizeof(state), touch);   /* state.count points */
+dmdrvi_input_state_t state;
+Dmod_FileRead(&state, 1, sizeof(state), touch);   /* state.contact_count contacts */
 Dmod_FileClose(touch);
 ```
 

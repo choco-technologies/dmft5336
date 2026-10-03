@@ -12,42 +12,8 @@
 /** Value of the chip ID register (0xA8) of an FT5336. */
 #define DMFT5336_CHIP_ID        0x51
 
-/**
- * @brief What happened to a touch point (FT5336 event flag).
- */
-typedef enum
-{
-    dmft5336_event_down = 0,    /**< The finger has just touched the panel */
-    dmft5336_event_up,          /**< The finger has just been lifted */
-    dmft5336_event_contact,     /**< The finger stays on the panel */
-    dmft5336_event_none,        /**< No event */
-} dmft5336_event_t;
-
-/**
- * @brief One touch point, in screen coordinates (after the configured
- *        swap/inversion).
- */
-typedef struct
-{
-    uint16_t            x;          /**< Column */
-    uint16_t            y;          /**< Line */
-    uint8_t             id;         /**< Touch ID - stays the same while the finger moves */
-    uint8_t             event;      /**< dmft5336_event_t */
-    uint8_t             weight;     /**< Touch pressure (0 when the chip does not report it) */
-    uint8_t             area;       /**< Touch area (0 when the chip does not report it) */
-} dmft5336_point_t;
-
-/**
- * @brief Touch state - what read() of the device node returns.
- *
- * count == 0 means nothing touches the panel.
- */
-typedef struct
-{
-    uint8_t             count;                          /**< Number of valid entries in points */
-    uint8_t             reserved[3];
-    dmft5336_point_t    points[DMFT5336_MAX_POINTS];    /**< Touch points */
-} dmft5336_state_t;
+/** Device name reported by DMDRVI_IOCTL_INPUT_GET_INFO. */
+#define DMFT5336_DEVICE_NAME    "FT5336"
 
 /**
  * @brief Coordinate transformation from the panel to the screen.
@@ -66,31 +32,30 @@ typedef struct
 } dmft5336_transform_t;
 
 /**
- * @brief Information returned by dmft5336_ioctl_cmd_get_info.
+ * @brief Information returned by dmft5336_ioctl_cmd_get_chip_info.
  */
 typedef struct
 {
     uint8_t             chip_id;            /**< Chip ID register (0x51 for an FT5336), 0 until the chip was reached */
     uint8_t             firmware_id;        /**< Firmware version register */
-    uint8_t             max_points;         /**< DMFT5336_MAX_POINTS */
-    bool                interrupt_driven;   /**< wait_event sleeps on the INT pin (else it polls) */
     dmft5336_transform_t transform;         /**< Configured coordinate transformation */
-} dmft5336_info_t;
+} dmft5336_chip_info_t;
 
 /**
- * @brief IOCTL commands of the dmft5336 device.
+ * @brief IOCTL commands specific to the dmft5336 device.
  *
- * read() of the node returns a dmft5336_state_t (the buffer must be at least
- * that large). These commands cover the rest.
+ * The node is a standard dmdrvi input device: read() returns a
+ * dmdrvi_input_state_t, DMDRVI_IOCTL_INPUT_GET_INFO / _GET_STATE /
+ * _WAIT_EVENT work as for any other input driver. These commands only add
+ * what is specific to the FT5336.
  */
 typedef enum
 {
     /* Private commands start at DMDRVI_IOCTL_CUSTOM_BASE: everything below
-     * it is a standard dmdrvi command (network, block, monitor) that dmdevfs
-     * and other generic code may send to any node - dmft5336 answers -ENOTTY. */
-    dmft5336_ioctl_cmd_get_info = DMDRVI_IOCTL_CUSTOM_BASE, /**< arg: dmft5336_info_t* */
-    dmft5336_ioctl_cmd_get_state,       /**< arg: dmft5336_state_t* - same as read() */
-    dmft5336_ioctl_cmd_wait_event,      /**< arg: const uint32_t* timeout in ms, or NULL to wait forever */
+     * it is a standard dmdrvi command. Generic code must check that the node
+     * is an FT5336 (DMDRVI_IOCTL_INPUT_GET_INFO name) before sending these -
+     * another driver numbers its own commands from the same base. */
+    dmft5336_ioctl_cmd_get_chip_info = DMDRVI_IOCTL_CUSTOM_BASE,   /**< arg: dmft5336_chip_info_t* */
 
     dmft5336_ioctl_cmd_max
 } dmft5336_ioctl_cmd_t;

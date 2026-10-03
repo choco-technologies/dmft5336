@@ -91,7 +91,7 @@ void chip_disconnect(dmdrvi_context_t context)
     context->firmware_id = 0;
 }
 
-int chip_read_state(dmdrvi_context_t context, dmft5336_state_t *state)
+int chip_read_state(dmdrvi_context_t context, dmdrvi_input_state_t *state)
 {
     uint8_t status = 0;
     int ret = read_registers(context, FT5336_REG_TD_STATUS, &status, 1);
@@ -108,8 +108,11 @@ int chip_read_state(dmdrvi_context_t context, dmft5336_state_t *state)
         ret = read_registers(context, (uint8_t)(FT5336_REG_P1_XH + i * FT5336_POINT_RECORD_SIZE), raw, sizeof(raw));
         if (ret != 0)
             return ret;
-        if (dmft5336_decode_point(raw, &context->transform, &state->points[state->count]))
-            state->count++;
+        /* Decoded aside: a rejected record must leave the unused entries
+         * zero (states are compared byte by byte). */
+        dmdrvi_input_contact_t contact;
+        if (dmft5336_decode_point(raw, &context->transform, &contact))
+            state->contacts[state->contact_count++] = contact;
     }
     return 0;
 }
@@ -125,9 +128,19 @@ static uint16_t transform_axis(uint16_t value, uint16_t size, bool invert)
     return invert ? (uint16_t)(size - 1U - value) : value;
 }
 
-dmod_dmft5336_api_declaration(1.0, bool, _decode_point, ( const uint8_t raw[6], const dmft5336_transform_t* transform, dmft5336_point_t* point ))
+static uint8_t contact_event(uint8_t event)
 {
-    if (raw == NULL || transform == NULL || point == NULL)
+    switch (event)
+    {
+        case FT5336_EVENT_DOWN: return DMDRVI_INPUT_CONTACT_DOWN;
+        case FT5336_EVENT_UP:   return DMDRVI_INPUT_CONTACT_UP;
+        default:                return DMDRVI_INPUT_CONTACT_MOVE;
+    }
+}
+
+dmod_dmft5336_api_declaration(2.0, bool, _decode_point, ( const uint8_t raw[6], const dmft5336_transform_t* transform, dmdrvi_input_contact_t* contact ))
+{
+    if (raw == NULL || transform == NULL || contact == NULL)
         return false;
 
     uint8_t event = (uint8_t)(raw[0] >> 6);
@@ -136,29 +149,11 @@ dmod_dmft5336_api_declaration(1.0, bool, _decode_point, ( const uint8_t raw[6], 
     uint16_t x = transform->swap_xy ? panel_y : panel_x;
     uint16_t y = transform->swap_xy ? panel_x : panel_y;
 
-    point->x      = transform_axis(x, transform->width, transform->invert_x);
-    point->y      = transform_axis(y, transform->height, transform->invert_y);
-    point->id     = (uint8_t)(raw[2] >> 4);
-    point->event  = event;
-    point->weight = raw[4];
-    point->area   = (uint8_t)(raw[5] >> 4);
-    return event != dmft5336_event_none;
-}
-
-static bool points_equal(const dmft5336_point_t *a, const dmft5336_point_t *b)
-{
-    return a->x == b->x && a->y == b->y && a->id == b->id && a->event == b->event &&
-           a->weight == b->weight && a->area == b->area;
-}
-
-dmod_dmft5336_api_declaration(1.0, bool, _states_equal, ( const dmft5336_state_t* a, const dmft5336_state_t* b ))
-{
-    if (a == NULL || b == NULL || a->count != b->count || a->count > DMFT5336_MAX_POINTS)
-        return false;
-    for (uint8_t i = 0; i < a->count; i++)
-    {
-        if (!points_equal(&a->points[i], &b->points[i]))
-            return false;
-    }
-    return true;
+    contact->x        = transform_axis(x, transform->width, transform->invert_x);
+    contact->y        = transform_axis(y, transform->height, transform->invert_y);
+    contact->id       = (uint8_t)(raw[2] >> 4);
+    contact->event    = contact_event(event);
+    contact->pressure = raw[4];
+    contact->size     = (uint8_t)(raw[5] >> 4);
+    return event != FT5336_EVENT_NONE;
 }

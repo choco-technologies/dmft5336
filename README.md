@@ -13,12 +13,20 @@ STM32F746G-DISCO's 4.3" LCD. It has no hardware port: the chip is reached
 through a [dmi2c](https://github.com/choco-technologies/dmi2c) bus node, so it
 runs on any target dmi2c supports.
 
-- `read()` of the node returns the current touch state (up to 5 points, in
-  screen coordinates),
-- `dmft5336_ioctl_cmd_wait_event` blocks until something changes - on the
+The node is a standard dmdrvi input device (`DMDRVI_IOCTL_INPUT_*`), so
+higher layers use it exactly like any other touch panel or mouse driver:
+
+- `read()` of the node (or `DMDRVI_IOCTL_INPUT_GET_STATE`) returns the
+  current `dmdrvi_input_state_t` (up to 5 contacts, in screen coordinates),
+- `DMDRVI_IOCTL_INPUT_WAIT_EVENT` blocks until something changes - on the
   chip's INT pin (a dmgpio interrupt dispatched through dmhaman) or by
   polling the chip,
+- `DMDRVI_IOCTL_INPUT_GET_INFO` describes the device (name `FT5336`,
+  touchscreen, screen size, capabilities),
 - swap/invert/clip transformation from panel to screen coordinates.
+
+Only the chip registers (chip/firmware ID) need the driver-specific
+`dmft5336_ioctl_cmd_get_chip_info`.
 
 ## Building
 
@@ -46,7 +54,9 @@ dmod_loader build/dmf/test_dmft5336.dmf
 ```
 
 On a target, `touchtest` (see [tools/touchtest](tools/touchtest/README.md))
-prints the chip info, the current state, or touches as they happen. In Renode
+prints the device and chip info, the current state, or touches as they
+happen - it uses only the standard input commands, so it works with any
+dmdrvi input driver. In Renode
 the STM32F7 Discovery platform has an FT5336 on I2C3; inject touches from the
 monitor with `sysbus.i2c3.touchscreen MoveTo X Y`, `... Press`, `... Release`.
 
@@ -68,15 +78,15 @@ bus path is configured by hand.
 Then:
 
 ```c
-#include "dmft5336.h"
+#include "dmdrvi_ioctl.h"
 
 void *touch = Dmod_FileOpen("/dev/touch", "r");
 uint32_t timeout = 1000;
-if (Dmod_Ioctl(touch, dmft5336_ioctl_cmd_wait_event, &timeout) == 0)
+if (Dmod_Ioctl(touch, DMDRVI_IOCTL_INPUT_WAIT_EVENT, &timeout) == 0)
 {
-    dmft5336_state_t state;
+    dmdrvi_input_state_t state;
     Dmod_FileRead(&state, 1, sizeof(state), touch);
-    /* state.count points in state.points[] */
+    /* state.contact_count contacts in state.contacts[] */
 }
 Dmod_FileClose(touch);
 ```
@@ -96,7 +106,7 @@ dmft5336/
 ├── docs/                   # Documentation (markdown format)
 ├── include/
 │   ├── dmft5336.h          # Module API
-│   └── dmft5336_types.h    # State, info, ioctl definitions
+│   └── dmft5336_types.h    # Transform, chip info, driver-specific ioctl
 ├── src/
 │   ├── dmft5336.c          # dmdrvi driver, configuration, wait_event
 │   ├── chip.c              # FT5336 register access over dmi2c, decoding
