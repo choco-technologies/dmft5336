@@ -44,9 +44,13 @@ their own commands from the same base.
 - **INT pin** (`interrupt_handler` set): sleeps until the chip's INT edge
   fires the named dmhaman handler. At most one pending report is remembered,
   so a touch between two waits is not lost.
-- **Polling** (no `interrupt_handler`): reads the chip every
-  `poll_interval_ms` until the state differs from the last one handed out by
-  `read()` or `GET_STATE`.
+- **Polling** (no `interrupt_handler`): reads the chip until the state
+  differs from the last one handed out by `read()` or `GET_STATE`, or the
+  timeout ends - it never sleeps past the timeout, so a caller waiting until
+  its next frame is back on time. While the panel is touched, and for
+  `active_ms` after a change, it reads every `poll_interval_ms`; otherwise
+  every `idle_poll_interval_ms` - fast while someone uses it, few bus
+  transfers while nobody does.
 
 The state the chip reports maps onto `dmdrvi_input_state_t` as:
 

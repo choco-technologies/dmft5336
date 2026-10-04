@@ -15,7 +15,9 @@
 | `invert_x` | `on`/`off` | `off` | Mirror X (needs `width`) |
 | `invert_y` | `on`/`off` | `off` | Mirror Y (needs `height`) |
 | `interrupt_handler` | name | (none) | dmhaman handler fired by the INT pin; without it `DMDRVI_IOCTL_INPUT_WAIT_EVENT` polls |
-| `poll_interval_ms` | decimal | 20 | Polling period of `DMDRVI_IOCTL_INPUT_WAIT_EVENT` without an INT pin, 1..1000 |
+| `poll_interval_ms` | decimal | 10 | Polling period of `DMDRVI_IOCTL_INPUT_WAIT_EVENT` without an INT pin while the panel is active - touched, or changed within `active_ms`; 1..1000 |
+| `idle_poll_interval_ms` | decimal | 50 (at least `poll_interval_ms`) | Polling period while the panel is idle; `poll_interval_ms`..1000 |
+| `active_ms` | decimal | 1000 | How long after a change the panel counts as active |
 
 These are the standard dmdrvi input keys (see dmdrvi's "Input Ioctl
 Commands"), so every input driver is configured the same way. Integers are
@@ -108,7 +110,8 @@ address=56
 width=480
 height=272
 swap_xy=on
-poll_interval_ms=20
+poll_interval_ms=10
+idle_poll_interval_ms=50
 ```
 
 Do not load dmi2c's own `i2c3.ini` next to it - it configures the same

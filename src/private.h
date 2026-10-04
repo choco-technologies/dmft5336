@@ -37,7 +37,10 @@ struct dmdrvi_context
     uint16_t                address;            /**< Unshifted 7-bit I2C address */
     dmft5336_transform_t    transform;          /**< Panel -> screen coordinates */
     char                   *interrupt_handler;  /**< dmhaman name fired by the INT pin (NULL = poll) */
-    uint32_t                poll_interval_ms;   /**< wait_event polling period without INT */
+    uint32_t                poll_interval_ms;   /**< wait_event polling period without INT, while active */
+    uint32_t                idle_poll_interval_ms; /**< ... while nothing touched for active_ms */
+    uint32_t                active_ms;          /**< How long after a change the panel counts as active */
+    uint32_t                last_change_ms;     /**< When the state last changed (tick count) */
     void                   *bus;                /**< Open bus node, NULL until the chip was reached */
     uint8_t                 chip_id;            /**< Read once the chip is reached */
     uint8_t                 firmware_id;
