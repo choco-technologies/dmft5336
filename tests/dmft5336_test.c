@@ -206,6 +206,19 @@ DMOD_TEST_STEP(dmft5336_create_rejects_invalid_config)
     DMOD_TEST_EXPECT_FALSE(device_open(&dev, "[touch]\npoll_interval_ms=0\n"));
     DMOD_TEST_EXPECT_NULL(dev.ctx);
     device_close(&dev);
+
+    /* Idle polling never faster than active polling */
+    DMOD_TEST_EXPECT_FALSE(device_open(&dev, "[touch]\npoll_interval_ms=20\nidle_poll_interval_ms=10\n"));
+    DMOD_TEST_EXPECT_NULL(dev.ctx);
+    device_close(&dev);
+
+    DMOD_TEST_EXPECT_FALSE(device_open(&dev, "[touch]\nactive_ms=-1\n"));
+    DMOD_TEST_EXPECT_NULL(dev.ctx);
+    device_close(&dev);
+
+    /* A slower active period raises the idle default with it */
+    DMOD_TEST_EXPECT_TRUE(device_open(&dev, "[touch]\npoll_interval_ms=100\n"));
+    device_close(&dev);
 }
 
 DMOD_TEST_STEP(dmft5336_reports_missing_bus)

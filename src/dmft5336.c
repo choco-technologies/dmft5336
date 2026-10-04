@@ -11,7 +11,9 @@
 #define DMFT5336_ADDRESS_MAX        0x77
 #define DMFT5336_DEFAULT_ADDRESS    0x38
 
-#define DMFT5336_DEFAULT_POLL_MS    20
+#define DMFT5336_DEFAULT_POLL_MS    10
+#define DMFT5336_DEFAULT_IDLE_POLL_MS 50
+#define DMFT5336_DEFAULT_ACTIVE_MS  1000
 #define DMFT5336_MAX_POLL_MS        1000
 
 static bool is_valid_context(dmdrvi_context_t context)
@@ -56,7 +58,7 @@ static char *dup_optional(dmini_context_t ini, const char *key)
     return (value != NULL && value[0] != '\0') ? Dmod_StrDup(value) : NULL;
 }
 
-static int check_config(int address, int poll_ms)
+static int check_config(int address, int poll_ms, int idle_poll_ms, int active_ms)
 {
     if (address < DMFT5336_ADDRESS_MIN || address > DMFT5336_ADDRESS_MAX)
     {
@@ -66,6 +68,16 @@ static int check_config(int address, int poll_ms)
     if (poll_ms < 1 || poll_ms > DMFT5336_MAX_POLL_MS)
     {
         DMOD_LOG_ERROR("Invalid poll_interval_ms %d (expected 1..%d)\n", poll_ms, DMFT5336_MAX_POLL_MS);
+        return -EINVAL;
+    }
+    if (idle_poll_ms < poll_ms || idle_poll_ms > DMFT5336_MAX_POLL_MS)
+    {
+        DMOD_LOG_ERROR("Invalid idle_poll_interval_ms %d (expected poll_interval_ms..%d)\n", idle_poll_ms, DMFT5336_MAX_POLL_MS);
+        return -EINVAL;
+    }
+    if (active_ms < 0)
+    {
+        DMOD_LOG_ERROR("Invalid active_ms %d\n", active_ms);
         return -EINVAL;
     }
     return 0;
@@ -83,6 +95,9 @@ static int read_config(dmdrvi_context_t context, dmini_context_t ini)
     dmft5336_transform_t *t = &context->transform;
     int address = dmini_get_int(ini, NULL, "address", DMFT5336_DEFAULT_ADDRESS);
     int poll_ms = dmini_get_int(ini, NULL, "poll_interval_ms", DMFT5336_DEFAULT_POLL_MS);
+    int idle_poll_ms = dmini_get_int(ini, NULL, "idle_poll_interval_ms",
+                                     (poll_ms > DMFT5336_DEFAULT_IDLE_POLL_MS) ? poll_ms : DMFT5336_DEFAULT_IDLE_POLL_MS);
+    int active_ms = dmini_get_int(ini, NULL, "active_ms", DMFT5336_DEFAULT_ACTIVE_MS);
     int width   = dmini_get_int(ini, NULL, "width", 0);
     int height  = dmini_get_int(ini, NULL, "height", 0);
 
@@ -99,9 +114,11 @@ static int read_config(dmdrvi_context_t context, dmini_context_t ini)
     t->width  = (uint16_t)width;
     t->height = (uint16_t)height;
 
-    int ret = check_config(address, poll_ms);
-    context->address          = (uint16_t)address;
-    context->poll_interval_ms = (uint32_t)poll_ms;
+    int ret = check_config(address, poll_ms, idle_poll_ms, active_ms);
+    context->address               = (uint16_t)address;
+    context->poll_interval_ms      = (uint32_t)poll_ms;
+    context->idle_poll_interval_ms = (uint32_t)idle_poll_ms;
+    context->active_ms             = (uint32_t)active_ms;
     return ret;
 }
 
@@ -169,13 +186,11 @@ static int read_state(dmdrvi_context_t context, dmdrvi_input_state_t *state)
     return ret;
 }
 
-static bool timed_out(uint32_t start_ms, int32_t timeout_ms)
-{
-    return timeout_ms >= 0 && (uint32_t)(dmosi_get_tick_count() - start_ms) >= (uint32_t)timeout_ms;
-}
-
 /* Without an INT pin: poll until the state differs from the one handed out
- * last (by read() or DMDRVI_IOCTL_INPUT_GET_STATE). */
+ * last (by read() or DMDRVI_IOCTL_INPUT_GET_STATE), or the timeout ends -
+ * never sleeping past it, so a caller that waits until its next frame gets
+ * there on time. The panel is polled every poll_interval_ms while touched
+ * and for active_ms after a change, else every idle_poll_interval_ms. */
 static int poll_for_change(dmdrvi_context_t context, int32_t timeout_ms)
 {
     uint32_t start_ms = dmosi_get_tick_count();
@@ -190,13 +205,26 @@ static int poll_for_change(dmdrvi_context_t context, int32_t timeout_ms)
             ret = chip_read_state(context, &now);
         dmosi_mutex_unlock(context->lock);
 
+        uint32_t now_ms = dmosi_get_tick_count();
         if (ret != 0)
             return ret;
         if (!dmdrvi_input_state_equal(&now, &seen))
+        {
+            context->last_change_ms = now_ms;
             return 0;
-        if (timed_out(start_ms, timeout_ms))
-            return -ETIMEDOUT;
-        dmosi_thread_sleep(context->poll_interval_ms);
+        }
+
+        uint32_t interval = (now.contact_count != 0U || (uint32_t)(now_ms - context->last_change_ms) < context->active_ms)
+                          ? context->poll_interval_ms : context->idle_poll_interval_ms;
+        if (timeout_ms >= 0)
+        {
+            uint32_t elapsed = now_ms - start_ms;
+            if (elapsed >= (uint32_t)timeout_ms)
+                return -ETIMEDOUT;
+            if (interval > (uint32_t)timeout_ms - elapsed)
+                interval = (uint32_t)timeout_ms - elapsed;
+        }
+        dmosi_thread_sleep(interval);
     }
 }
 
